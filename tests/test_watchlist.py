@@ -7,8 +7,8 @@ Mirrors the structure of tests/test_collection.py.
 
 import pytest
 from app import create_app, db
-from models import User, Film
-from services.watchlist_service import add_to_watchlist
+from models import User, Film, WatchlistEntry
+from services.watchlist_service import add_to_watchlist, AlreadyInWatchlistError
 from services.collection_service import FilmNotFoundError
 
 
@@ -46,14 +46,47 @@ def sample_film(app):
         return film.id
 
 
-# ── Nonexistent film ─────────────────────────────────────────────────────────
+# ── Basic add ─────────────────────────────────────────────────────────────────
 
-# 👇 YOUR TEST GOES HERE.
-# Write:  def test_add_to_watchlist_nonexistent_film_raises(app, sample_user):
-# Model it on test_add_to_collection_nonexistent_film_raises in test_collection.py
-# (lines 98-107). Remember the gotcha: on THIS branch Film.id is an INTEGER,
-# so your fake film_id should be a nonexistent integer (e.g. 999999),
-# NOT a UUID string like the collection test uses.
+def test_add_to_watchlist_creates_entry(app, sample_user, sample_film):
+    """
+    Adding a valid film should create a WatchlistEntry in the database.
+    """
+    with app.app_context():
+        entry = add_to_watchlist(user_id=sample_user, film_id=sample_film)
+
+        assert entry is not None
+        assert entry.user_id == sample_user
+        assert entry.film_id == sample_film
+
+        # Verify it persisted
+        in_db = WatchlistEntry.query.filter_by(
+            user_id=sample_user, film_id=sample_film
+        ).first()
+        assert in_db is not None
+
+
+# ── Deduplication ─────────────────────────────────────────────────────────────
+
+def test_add_to_watchlist_duplicate_raises(app, sample_user, sample_film):
+    """
+    Adding the same film twice should raise AlreadyInWatchlistError,
+    not silently create a duplicate entry.
+    """
+    with app.app_context():
+        add_to_watchlist(user_id=sample_user, film_id=sample_film)
+
+        with pytest.raises(AlreadyInWatchlistError):
+            add_to_watchlist(user_id=sample_user, film_id=sample_film)
+
+        # Confirm only one entry exists
+        count = WatchlistEntry.query.filter_by(
+            user_id=sample_user, film_id=sample_film
+        ).count()
+        assert count == 1
+
+
+# ── Nonexistent film ──────────────────────────────────────────────────────────
 
 def test_add_to_watchlist_nonexistent_film_raises(app, sample_user):
     """
@@ -65,6 +98,3 @@ def test_add_to_watchlist_nonexistent_film_raises(app, sample_user):
 
         with pytest.raises(FilmNotFoundError):
             add_to_watchlist(user_id=sample_user, film_id=fake_film_id)
-
-
-
